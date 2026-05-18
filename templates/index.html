@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Color Identifier</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0b0b0f;
+      --surface: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.10);
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Shared ── */
+    .screen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    .screen.hidden { opacity: 0; pointer-events: none; }
+
+    canvas { display: block; }
+
+    /* ── Login screen ── */
+    #login-screen { gap: 20px; }
+
+    .login-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .cam-wrap {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+
+    #login-canvas {
+      width: 560px;
+      height: 420px;
+      display: block;
+    }
+
+    .login-status-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 12px 20px;
+      background: rgba(11,11,15,0.75);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.scanning { background: #f59e0b; animation: pulse 1.2s infinite; }
+    .status-dot.detected { background: #3b82f6; }
+    .status-dot.recognized { background: var(--green); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    #login-status-text { font-size: 0.85rem; color: var(--muted); }
+
+    .login-footer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .login-footer a {
+      color: var(--green);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .login-footer a:hover { text-decoration: underline; }
+
+    /* ── Welcome overlay ── */
+    #welcome-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(11,11,15,0.82);
+      backdrop-filter: blur(4px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s;
+      border-radius: 16px;
+    }
+    #welcome-overlay.show { opacity: 1; }
+    #welcome-name {
+      font-size: 1.9rem;
+      font-weight: 700;
+      color: var(--green);
+    }
+    #welcome-sub {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    /* ── Color screen ── */
+    #color-screen { padding: 0; }
+
+    #color-canvas {
+      width: 100vw;
+      height: 100dvh;
+      cursor: crosshair;
+    }
+
+    /* Glass panel */
+    .glass-panel {
+      position: absolute;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+
+    #color-panel {
+      top: 18px; left: 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 260px;
+    }
+
+    #color-swatch {
+      width: 64px; height: 64px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      flex-shrink: 0;
+      transition: background 0.1s;
+    }
+
+    .color-text { display: flex; flex-direction: column; gap: 4px; }
+    #color-name { font-size: 1.05rem; font-weight: 600; }
+    #color-hex  { font-size: 0.8rem; color: var(--muted); font-family: monospace; }
+    #color-rgb  { font-size: 0.75rem; color: var(--muted); font-family: monospace; }
+
+    #user-badge {
+      bottom: 18px; right: 18px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      padding: 8px 14px;
+    }
+    #user-badge span { color: var(--green); font-weight: 600; }
+
+    #hint-badge {
+      bottom: 18px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.72rem;
+      color: var(--muted);
+      padding: 6px 14px;
+      white-space: nowrap;
+    }
+
+    /* ── Camera error overlay ── */
+    #cam-error {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(11,11,15,0.92);
+      border-radius: 16px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 28px;
+      text-align: center;
+    }
+    #cam-error.show { display: flex; }
+    #cam-error-icon { font-size: 2.4rem; }
+    #cam-error-title { font-size: 1rem; font-weight: 700; }
+    #cam-error-msg { font-size: 0.78rem; color: var(--muted); max-width: 300px; line-height: 1.5; }
+    #cam-retry-btn {
+      margin-top: 6px;
+      padding: 10px 24px;
+      background: var(--green);
+      color: #0b0b0f;
+      font-size: 0.85rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #cam-retry-btn:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+<!-- ── Login Screen ── -->
+<div id="login-screen" class="screen">
+  <p class="login-title">Face Login</p>
+  <div class="cam-wrap">
+    <canvas id="login-canvas" width="640" height="480"></canvas>
+
+    <!-- Camera error state -->
+    <div id="cam-error">
+      <div id="cam-error-icon">📷</div>
+      <div id="cam-error-title">Camera access needed</div>
+      <div id="cam-error-msg"></div>
+      <button id="cam-retry-btn">Allow Camera</button>
+    </div>
+
+    <div id="welcome-overlay">
+      <div id="welcome-name"></div>
+      <div id="welcome-sub">Starting color identifier…</div>
+    </div>
+    <div class="login-status-bar">
+      <div class="status-dot scanning" id="status-dot"></div>
+      <span id="login-status-text">Scanning for face…</span>
+    </div>
+  </div>
+  <p class="login-footer">
+    First time? <a href="/enroll">Register your face</a>
+  </p>
+</div>
+
+<!-- ── Color Screen ── -->
+<div id="color-screen" class="screen hidden">
+  <canvas id="color-canvas"></canvas>
+  <div class="glass-panel" id="color-panel">
+    <div id="color-swatch"></div>
+    <div class="color-text">
+      <div id="color-name">—</div>
+      <div id="color-hex">#000000</div>
+      <div id="color-rgb">RGB 0, 0, 0</div>
+    </div>
+  </div>
+  <div class="glass-panel" id="user-badge">
+    Logged in as <span id="username"></span>
+  </div>
+  <div class="glass-panel" id="hint-badge">
+    Move cursor over any color · Q to return to login
+  </div>
+</div>
+
+<video id="video" autoplay playsinline muted style="display:none"></video>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const STATE = { LOGIN: 'login', COLOR: 'color' };
+let state = STATE.LOGIN;
+let loggedInUser = 'Guest';
+let mouseX = -1, mouseY = -1;
+let lastFaces = [];
+let recognizing = false;
+let hasModel = false;
+
+// ── Elements ───────────────────────────────────────────────────────────────
+const video        = document.getElementById('video');
+const loginCanvas  = document.getElementById('login-canvas');
+const colorCanvas  = document.getElementById('color-canvas');
+const lCtx         = loginCanvas.getContext('2d');
+const cCtx         = colorCanvas.getContext('2d');
+const loginScreen  = document.getElementById('login-screen');
+const colorScreen  = document.getElementById('color-screen');
+const statusDot    = document.getElementById('status-dot');
+const statusText   = document.getElementById('login-status-text');
+const welcomeOverlay = document.getElementById('welcome-overlay');
+const welcomeName  = document.getElementById('welcome-name');
+const colorSwatch  = document.getElementById('color-swatch');
+const colorName    = document.getElementById('color-name');
+const colorHex     = document.getElementById('color-hex');
+const colorRgb     = document.getElementById('color-rgb');
+const username     = document.getElementById('username');
+
+// ── Webcam ─────────────────────────────────────────────────────────────────
+const camError     = document.getElementById('cam-error');
+const camErrorMsg  = document.getElementById('cam-error-msg');
+let recognitionInterval = null;
+
+async function startCam() {
+  camError.classList.remove('show');
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw Object.assign(new Error(), { name: 'APIUnavailable' });
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    video.srcObject = stream;
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
+    });
+    await video.play();
+    return true;
+  } catch (err) {
+    const msgs = {
+      NotAllowedError:       'Camera permission was denied. Click "Allow Camera" then accept the browser popup.\n\nOn macOS also check: System Settings → Privacy & Security → Camera → allow your browser.',
+      PermissionDeniedError: 'Camera permission was denied. Click "Allow Camera" then accept the browser popup.\n\nOn macOS also check: System Settings → Privacy & Security → Camera → allow your browser.',
+      NotFoundError:         'No camera detected. Make sure a webcam is connected and not disabled.',
+      DevicesNotFoundError:  'No camera detected. Make sure a webcam is connected and not disabled.',
+      NotReadableError:      'Camera is already in use by another app (e.g. Zoom, FaceTime). Close it and click "Allow Camera".',
+      APIUnavailable:        'Camera API unavailable. Open this page at http://localhost:5000 (not as a file).',
+    };
+    camErrorMsg.textContent = msgs[err.name] || `Camera error: ${err.message}`;
+    camError.classList.add('show');
+    return false;
+  }
+}
+
+document.getElementById('cam-retry-btn').addEventListener('click', async () => {
+  const ok = await startCam();
+  if (ok) {
+    requestAnimationFrame(drawLoginFrame);
+    if (!recognitionInterval) {
+      recognitionInterval = setInterval(runRecognition, 1800);
+    }
+  }
+});
+
+// ── Color detection (runs entirely in browser) ─────────────────────────────
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  const s = max === 0 ? 0 : d / max;
+  const v = max;
+  if (d !== 0) {
+    if (max === r)      h = ((g - b) / d % 6) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else                h = ((r - g) / d + 4) / 6;
+    if (h < 0) h += 1;
+  }
+  return [Math.round(h * 179), Math.round(s * 255), Math.round(v * 255)];
+}
+
+function getColorName(r, g, b) {
+  const [h, s, v] = rgbToHsv(r, g, b);
+  if (v < 30) return 'Black';
+  if (v < 60 && s < 50) return 'Dark Gray';
+  if (s < 35) {
+    if (v > 220) return 'White';
+    if (v > 185) return 'Light Gray';
+    if (v > 110) return 'Gray';
+    return 'Dark Gray';
+  }
+  if (h >= 10 && h <= 25 && s > 60 && v < 80)             return 'Dark Brown';
+  if (h >= 8  && h <= 25 && s > 60  && s <= 160 && v >= 80 && v < 160) return 'Brown';
+  if (h >= 10 && h <= 30 && s > 30  && s <= 100 && v >= 150) return 'Beige';
+  if (h >= 8  && h <= 25 && s > 160 && v >= 80  && v < 160)  return 'Chocolate';
+
+  const red = h <= 10 || h >= 165;
+  if (red) {
+    if (s > 180 && v < 90)  return 'Maroon';
+    if (s > 150 && v > 160) return 'Red';
+    if (s > 100 && v > 100) return 'Dark Red';
+    if (s <= 150 && v > 160) return 'Pink';
+    if (s <= 100 && v > 140) return 'Light Pink';
+    return 'Red';
+  }
+  if (h > 10 && h <= 14) {
+    if (s > 180 && v > 150)         return 'Orange Red';
+    if (s > 100 && v > 120)         return 'Coral';
+    if (s > 80 && s <= 180 && v > 150) return 'Salmon';
+  }
+  if (h > 14 && h <= 25) {
+    if (s > 200 && v > 180) return 'Orange';
+    if (s > 150 && v > 140) return 'Dark Orange';
+    if (s > 80  && v > 160) return 'Peach';
+  }
+  if (h > 25 && h <= 33) {
+    if (s > 180 && v > 180) return 'Yellow';
+    if (s > 120 && v >= 100 && v <= 200) return 'Gold';
+    if (s <= 120 && v > 160) return 'Cream';
+  }
+  if (h > 33 && h <= 48) {
+    if (v < 120) return 'Olive';
+    if (s > 150) return 'Yellow Green';
+    return 'Light Olive';
+  }
+  if (h > 48 && h <= 85) {
+    if (s > 180 && v > 180) return 'Lime Green';
+    if (v < 80)              return 'Dark Green';
+    if (v < 140 && s > 100) return 'Forest Green';
+    if (s < 100 && v > 160) return 'Mint';
+    return 'Green';
+  }
+  if (h > 85 && h <= 100) {
+    if (v < 120)   return 'Teal';
+    if (s > 150)   return 'Cyan';
+    return 'Light Cyan';
+  }
+  if (h > 100 && h <= 115) {
+    if (s < 120 && v > 180) return 'Sky Blue';
+    if (v < 100)             return 'Navy Blue';
+    if (s > 180)             return 'Azure';
+    return 'Light Blue';
+  }
+  if (h > 115 && h <= 130) {
+    if (v < 100)             return 'Dark Blue';
+    if (s > 180 && v > 150)  return 'Blue';
+    if (s > 120)             return 'Royal Blue';
+    return 'Steel Blue';
+  }
+  if (h > 130 && h <= 145) return v < 100 ? 'Dark Indigo' : 'Indigo';
+  if (h > 145 && h <= 158) {
+    if (s < 120 && v > 160) return 'Lavender';
+    if (v < 100)             return 'Dark Purple';
+    return 'Purple';
+  }
+  if (h > 158 && h <= 168) {
+    if (s > 180 && v > 160) return 'Magenta';
+    if (s > 100 && v > 140) return 'Violet';
+    if (s < 120)             return 'Lavender';
+    return 'Purple';
+  }
+  if (h > 168) {
+    if (s > 180 && v > 180) return 'Hot Pink';
+    if (s > 100 && v > 150) return 'Deep Pink';
+    return 'Pink';
+  }
+  return 'Unknown';
+}
+
+// ── Capture frame as base64 ────────────────────────────────────────────────
+function captureFrame(w = 320, h = 240) {
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const ctx = tmp.getContext('2d');
+  // mirror
+  ctx.save(); ctx.scale(-1, 1); ctx.drawImage(video, -w, 0, w, h); ctx.restore();
+  return tmp.toDataURL('image/jpeg', 0.7);
+}
+
+// ── Face recognition (polls server) ───────────────────────────────────────
+async function runRecognition() {
+  if (recognizing || state !== STATE.LOGIN) return;
+  recognizing = true;
+  try {
+    const res = await fetch('/api/recognize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: captureFrame(320, 240) }),
+    });
+    const data = await res.json();
+
+    if (data.status === 'no_model') {
+      setStatus('No face model — <a href="/enroll">register first</a>', 'scanning');
+      lastFaces = [];
+    } else if (data.status === 'no_face') {
+      setStatus('Scanning for face…', 'scanning');
+      lastFaces = [];
+    } else if (data.status === 'detected') {
+      setStatus('Face detected — not recognized', 'detected');
+      lastFaces = scaleFaces(data.faces, 320, 240);
+    } else if (data.status === 'recognized') {
+      lastFaces = scaleFaces(data.faces, 320, 240);
+      showWelcome(data.name);
+    }
+  } catch (_) {}
+  recognizing = false;
+}
+
+function scaleFaces(faces, srcW, srcH) {
+  const scaleX = loginCanvas.width / srcW;
+  const scaleY = loginCanvas.height / srcH;
+  return faces.map(f => ({
+    ...f,
+    x: f.x * scaleX, y: f.y * scaleY,
+    w: f.w * scaleX, h: f.h * scaleY,
+  }));
+}
+
+function setStatus(text, mode) {
+  statusText.innerHTML = text;
+  statusDot.className = 'status-dot ' + mode;
+}
+
+function showWelcome(name) {
+  loggedInUser = name;
+  welcomeName.textContent = `Welcome, ${name}!`;
+  welcomeOverlay.classList.add('show');
+  setStatus(`Recognized: ${name}`, 'recognized');
+  setTimeout(transitionToColor, 2200);
+}
+
+function transitionToColor() {
+  loginScreen.classList.add('hidden');
+  colorScreen.classList.remove('hidden');
+  username.textContent = loggedInUser;
+  state = STATE.COLOR;
+  resizeColorCanvas();
+  requestAnimationFrame(drawColorFrame); // kick off the color draw loop
+}
+
+// ── Login canvas draw loop ─────────────────────────────────────────────────
+function drawLoginFrame() {
+  if (state !== STATE.LOGIN) return;
+  const { width: cw, height: ch } = loginCanvas;
+
+  lCtx.save();
+  lCtx.scale(-1, 1);
+  lCtx.drawImage(video, -cw, 0, cw, ch);
+  lCtx.restore();
+
+  // face boxes
+  for (const f of lastFaces) {
+    const recognized = f.name !== 'Unknown';
+    lCtx.strokeStyle = recognized ? '#22c55e' : '#3b82f6';
+    lCtx.lineWidth = 2;
+    lCtx.strokeRect(f.x, f.y, f.w, f.h);
+    if (f.name && recognized) {
+      lCtx.fillStyle = '#22c55e';
+      lCtx.font = '600 13px system-ui';
+      lCtx.fillText(f.name, f.x + 4, f.y - 8);
+    }
+  }
+
+  requestAnimationFrame(drawLoginFrame);
+}
+
+// ── Color canvas draw loop ─────────────────────────────────────────────────
+function resizeColorCanvas() {
+  colorCanvas.width  = window.innerWidth;
+  colorCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => { if (state === STATE.COLOR) resizeColorCanvas(); });
+
+colorCanvas.addEventListener('mousemove', e => {
+  const r = colorCanvas.getBoundingClientRect();
+  mouseX = e.clientX - r.left;
+  mouseY = e.clientY - r.top;
+});
+
+function drawColorFrame() {
+  if (state !== STATE.COLOR) return;
+
+  const cw = colorCanvas.width, ch = colorCanvas.height;
+  cCtx.save();
+  cCtx.scale(-1, 1);
+  cCtx.drawImage(video, -cw, 0, cw, ch);
+  cCtx.restore();
+
+  // sample pixel at cursor
+  const px = mouseX >= 0 ? mouseX : cw / 2;
+  const py = mouseY >= 0 ? mouseY : ch / 2;
+
+  // sample 10x10 region, take average
+  const region = cCtx.getImageData(Math.max(0, px - 5), Math.max(0, py - 5), 10, 10);
+  let rSum = 0, gSum = 0, bSum = 0, count = 0;
+  for (let i = 0; i < region.data.length; i += 4) {
+    rSum += region.data[i];
+    gSum += region.data[i + 1];
+    bSum += region.data[i + 2];
+    count++;
+  }
+  const r = Math.round(rSum / count);
+  const g = Math.round(gSum / count);
+  const b = Math.round(bSum / count);
+  const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const name = getColorName(r, g, b);
+
+  // update panel
+  colorSwatch.style.background = hex;
+  colorName.textContent = name;
+  colorHex.textContent = hex;
+  colorRgb.textContent = `RGB ${r}, ${g}, ${b}`;
+
+  // draw crosshair
+  drawCrosshair(cCtx, px, py, hex);
+
+  requestAnimationFrame(drawColorFrame);
+}
+
+function drawCrosshair(ctx, x, y, accentHex) {
+  const arms = [[x-16, y, x-5, y], [x+5, y, x+16, y], [x, y-16, x, y-5], [x, y+5, x, y+16]];
+  for (const [x1, y1, x2, y2] of arms) {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+  ctx.fillStyle = accentHex; ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+// ── Keyboard ───────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'q' || e.key === 'Q') {
+    if (state === STATE.COLOR) {
+      state = STATE.LOGIN;
+      lastFaces = [];
+      welcomeOverlay.classList.remove('show');
+      colorScreen.classList.add('hidden');
+      loginScreen.classList.remove('hidden');
+      setStatus('Scanning for face…', 'scanning');
+      requestAnimationFrame(drawLoginFrame);
+      setInterval(runRecognition, 1800);
+    }
+  }
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    hasModel = data.has_model;
+    if (!hasModel) {
+      setStatus('No faces registered — <a href="/enroll" style="color:#22c55e">register first</a>', 'scanning');
+    }
+  } catch (_) {
+    setStatus('Cannot reach server — is app.py running?', 'scanning');
+    return;
+  }
+
+  const ok = await startCam();
+  if (!ok) return;
+
+  resizeColorCanvas();
+  requestAnimationFrame(drawLoginFrame);
+  recognitionInterval = setInterval(runRecognition, 1800);
+}
+
+init();
+</script>
+</body>
+</html>

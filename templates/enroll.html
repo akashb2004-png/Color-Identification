@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register Face</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0b0b0f;
+      --surface: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.10);
+      --green: #22c55e;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      padding: 24px;
+    }
+
+    .header { text-align: center; }
+    .header h1 { font-size: 1.5rem; font-weight: 700; }
+    .header p  { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+
+    /* ── Setup form ── */
+    #setup-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus { border-color: var(--green); }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: var(--green);
+      color: #0b0b0f;
+      font-size: 0.95rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Capture section ── */
+    #capture-section { display: none; flex-direction: column; align-items: center; gap: 16px; }
+    #capture-section.visible { display: flex; }
+
+    .cam-wrap {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    #enroll-canvas {
+      width: 480px;
+      height: 360px;
+      display: block;
+    }
+
+    .face-badge {
+      position: absolute;
+      top: 12px; left: 12px;
+      background: rgba(11,11,15,0.75);
+      backdrop-filter: blur(8px);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .face-badge.detected { color: var(--green); }
+    .face-badge.none     { color: #f59e0b; }
+
+    /* Progress */
+    .progress-wrap {
+      width: 480px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .progress-bar-bg {
+      height: 8px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    #progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    #enroll-status {
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    #enroll-status.success { color: var(--green); font-weight: 600; }
+    #enroll-status.error   { color: #ef4444; }
+
+    .back-link {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .back-link:hover { color: var(--green); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Register Your Face</h1>
+  <p>Your face data is stored locally and never sent to any external service.</p>
+</div>
+
+<!-- Step 1: name input -->
+<div id="setup-section">
+  <input id="name-input" type="text" placeholder="Enter your name" maxlength="40" autocomplete="off" />
+  <button id="start-btn">Start Registration</button>
+</div>
+
+<!-- Step 2: capture -->
+<div id="capture-section">
+  <div class="cam-wrap">
+    <canvas id="enroll-canvas" width="640" height="480"></canvas>
+    <div class="face-badge" id="face-badge">Looking for face…</div>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-label">
+      <span id="progress-label">0 / 40 samples</span>
+      <span id="progress-pct">0%</span>
+    </div>
+    <div class="progress-bar-bg"><div id="progress-fill"></div></div>
+  </div>
+
+  <div id="enroll-status">Keep your face centred in the frame</div>
+</div>
+
+<a href="/" class="back-link">← Back to login</a>
+
+<video id="video" autoplay playsinline muted style="display:none"></video>
+
+<script>
+const SAMPLES_NEEDED = 40;
+const INTERVAL_MS    = 400;
+
+const video         = document.getElementById('video');
+const canvas        = document.getElementById('enroll-canvas');
+const ctx           = canvas.getContext('2d');
+const nameInput     = document.getElementById('name-input');
+const startBtn      = document.getElementById('start-btn');
+const setupSection  = document.getElementById('setup-section');
+const captureSection = document.getElementById('capture-section');
+const faceBadge     = document.getElementById('face-badge');
+const progressFill  = document.getElementById('progress-fill');
+const progressLabel = document.getElementById('progress-label');
+const progressPct   = document.getElementById('progress-pct');
+const enrollStatus  = document.getElementById('enroll-status');
+
+let capturing = false;
+let count = 0;
+let intervalId = null;
+let personName = '';
+
+// ── Webcam ─────────────────────────────────────────────────────────────────
+async function startCam() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw Object.assign(new Error(), { name: 'APIUnavailable' });
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    video.srcObject = stream;
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
+    });
+    await video.play();
+    return true;
+  } catch (err) {
+    const msgs = {
+      NotAllowedError:      'Camera permission denied. Accept the browser popup.\n\nOn macOS: System Settings → Privacy & Security → Camera → allow your browser.',
+      NotFoundError:        'No camera found. Make sure a webcam is connected.',
+      NotReadableError:     'Camera is in use by another app. Close it and try again.',
+      APIUnavailable:       'Open this page at http://localhost:5000 (not as a file).',
+    };
+    const msg = msgs[err.name] || `Camera error: ${err.message}`;
+    enrollStatus.textContent = msg;
+    enrollStatus.className = 'error';
+    startBtn.disabled = false;
+    return false;
+  }
+}
+
+function drawFrame() {
+  if (!capturing) return;
+  ctx.save(); ctx.scale(-1, 1); ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height); ctx.restore();
+  requestAnimationFrame(drawFrame);
+}
+
+function captureFrame() {
+  const tmp = document.createElement('canvas');
+  tmp.width = 320; tmp.height = 240;
+  const c = tmp.getContext('2d');
+  c.save(); c.scale(-1, 1); c.drawImage(video, -320, 0, 320, 240); c.restore();
+  return tmp.toDataURL('image/jpeg', 0.75);
+}
+
+// ── Send frame to server ───────────────────────────────────────────────────
+async function sendFrame() {
+  if (count >= SAMPLES_NEEDED) return;
+
+  try {
+    const res = await fetch('/api/enroll/frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: personName, image: captureFrame() }),
+    });
+    const data = await res.json();
+
+    if (!data.ok && !data.bbox) {
+      faceBadge.textContent = 'No face detected — move closer';
+      faceBadge.className = 'face-badge none';
+      return;
+    }
+
+    // draw face box
+    if (data.bbox) {
+      const [bx, by, bw, bh] = data.bbox;
+      const sx = canvas.width / 320, sy = canvas.height / 240;
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2;
+      ctx.strokeRect(bx * sx, by * sy, bw * sx, bh * sy);
+      faceBadge.textContent = 'Face detected ✓';
+      faceBadge.className = 'face-badge detected';
+    }
+
+    count = data.count;
+    const pct = Math.round(count / SAMPLES_NEEDED * 100);
+    progressFill.style.width = pct + '%';
+    progressLabel.textContent = `${count} / ${SAMPLES_NEEDED} samples`;
+    progressPct.textContent = pct + '%';
+
+    if (data.done) {
+      clearInterval(intervalId);
+      enrollStatus.textContent = 'Training model… please wait';
+      enrollStatus.className = '';
+      // Model is already trained server-side. Redirect after short delay.
+      setTimeout(() => {
+        enrollStatus.textContent = 'Done! Redirecting to login…';
+        enrollStatus.className = 'success';
+        setTimeout(() => { window.location.href = '/'; }, 1200);
+      }, 800);
+    }
+  } catch (err) {
+    enrollStatus.textContent = 'Connection error — retrying…';
+    enrollStatus.className = 'error';
+  }
+}
+
+// ── Start ──────────────────────────────────────────────────────────────────
+startBtn.addEventListener('click', async () => {
+  personName = nameInput.value.trim();
+  if (!personName) { nameInput.focus(); return; }
+
+  startBtn.disabled = true;
+  setupSection.style.display = 'none';
+  captureSection.classList.add('visible');
+
+  const ok = await startCam();
+  if (!ok) {
+    captureSection.classList.remove('visible');
+    setupSection.style.display = 'flex';
+    return;
+  }
+
+  capturing = true;
+  requestAnimationFrame(drawFrame);
+  intervalId = setInterval(sendFrame, INTERVAL_MS);
+});
+
+nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startBtn.click(); });
+</script>
+</body>
+</html>
